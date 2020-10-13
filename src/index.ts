@@ -1,10 +1,11 @@
 import type { PlaygroundPlugin, PluginUtils } from "./vendor/playground"
 
+let g = "// NOT DONE YET";
 const makePlugin = (utils: PluginUtils) => {
   const customPlugin: PlaygroundPlugin = {
-    id: "example",
-    displayName: "Dev Example",
-    didMount: (sandbox, container) => {
+    id: "dtshelper",
+    displayName: "d.ts helper",
+    didMount: async (sandbox, container) => {
       console.log("Showing new plugin")
 
       // Create a design system object to handle
@@ -17,10 +18,27 @@ const makePlugin = (utils: PluginUtils) => {
       const startButton = document.createElement("input")
       startButton.type = "button"
       startButton.value = "Change the code in the editor"
+      const name = document.createElement("input")
+      name.type = "input"
+      name.value = "react"
+      container.appendChild(name)
       container.appendChild(startButton)
 
-      startButton.onclick = () => {
-        sandbox.setText("// You clicked the button!")
+      startButton.onclick = async () => {
+        // typescriptlang.org/dev/typescript-vfs
+        sandbox.setText(`// FETCHING ${name.value} ...`)
+        const response = await fetch(`https://unpkg.com/${name.value}/?meta`)
+        if (!response.ok) {
+          sandbox.setText("// NOPE: " + response.statusText)
+        }
+        else {
+          var o = await response.json()
+          // TODO: Next step is to find the entry point in package.json
+          // Then load all the js files from:
+          // var jss = flab(o).filter(f => f.endsWith('.js'))
+          // then create a vfs and pass it all to typescript
+          sandbox.setText(JSON.stringify(o, undefined, 2))
+        }
       }
     },
 
@@ -40,6 +58,41 @@ const makePlugin = (utils: PluginUtils) => {
   }
 
   return customPlugin
+}
+
+type UnpkgFS = {
+  type: "directory",
+  path: string,
+  files: UnpkgFS[]
+} | {
+  type: "file",
+  path: string,
+  contentType: "application/javascript" | "application/json" | string,
+  integrity: string,
+  lastModified: string,
+  size: string
+}
+
+/// a flat list of files from the unpkg fs
+function flab(ufs: UnpkgFS): string[] {
+  if (ufs.type === "file")
+    return [ufs.path]
+  else
+    return flatMap(ufs.files, flab)
+}
+
+function flatMap<T, U>(l: T[], f: (t: T) => U[]): U[] {
+  if (Array.prototype.hasOwnProperty('flatMap'))
+    return (Array.prototype as any).flatMap.call(l, f)
+  const acc = []
+  for (const x of l)
+    acc.push(...f(x))
+  return acc
+}
+
+/// find index.js from package.json or whatever
+function main(ufs: UnpkgFS) {
+  
 }
 
 export default makePlugin
