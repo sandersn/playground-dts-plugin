@@ -7,13 +7,17 @@ const makePlugin = (utils: PluginUtils) => {
     displayName: "d.ts helper",
     didMount: async (sandbox, container) => {
       console.log("Showing new plugin")
+      const options = { ...sandbox.getCompilerOptions(), allowJs: true, checkJs: true };
+      const { createSystem, createDefaultMapFromCDN, createVirtualCompilerHost } = sandbox.tsvfs
+      // TODO: May need to allow user to configure which libs to include
+      const fsMap = await createDefaultMapFromCDN(options, sandbox.ts.version, true, sandbox.ts)
 
       // Create a design system object to handle
       // making DOM elements which fit the playground (and handle mobile/light/dark etc)
       const ds = utils.createDesignSystem(container)
 
-      ds.title("Example Plugin")
-      ds.p("This plugin has a button which changes the text in the editor, click below to test it")
+      ds.title("Generate d.ts from JS")
+      ds.p("Put the name of an npm package to generate a d.ts from it")
 
       const startButton = document.createElement("input")
       startButton.type = "button"
@@ -25,20 +29,24 @@ const makePlugin = (utils: PluginUtils) => {
       container.appendChild(startButton)
 
       startButton.onclick = async () => {
-        // typescriptlang.org/dev/typescript-vfs
-        sandbox.setText(`// FETCHING ${name.value} ...`)
-        const response = await fetch(`https://unpkg.com/${name.value}/?meta`)
-        if (!response.ok) {
-          sandbox.setText("// NOPE: " + response.statusText)
-        }
-        else {
-          var o = await response.json()
-          // TODO: Next step is to find the entry point in package.json
-          // Then load all the js files from:
-          // var jss = flab(o).filter(f => f.endsWith('.js'))
-          // then create a vfs and pass it all to typescript
-          sandbox.setText(JSON.stringify(o, undefined, 2))
-        }
+        // const o: UnpkgFS = await jfetch(`https://unpkg.com/${name.value}/?meta`, sandbox.setText)
+        // var jss = flab(o).filter(f => f.endsWith('.js'))
+
+        const p = await jfetch(`https://unpkg.com/${name.value}/package.json`, sandbox.setText)
+        const main = "/" + p.main;
+        const indexjs = await jfetch(`https://unpkg.com/${name.value}${main}`, sandbox.setText, /*returnText*/ true)
+        fsMap.set(main, indexjs)
+        const system = createSystem(fsMap)
+        const host = createVirtualCompilerHost(system, options, sandbox.ts)
+        const program = sandbox.ts.createProgram({
+          rootNames: [main],
+          options,
+          host: host.compilerHost
+        })
+        console.log('after creating program')
+        const sourceFile = program.getSourceFile(main)
+        program.emit(sourceFile, undefined, undefined, true)
+        sandbox.setText(system.readFile("/index.d.ts"))
       }
     },
 
@@ -73,6 +81,18 @@ type UnpkgFS = {
   size: string
 }
 
+async function jfetch(url: string, log: (s: string) => void, returnText?: boolean) {
+  log(`// FETCHING ${url} ...`)
+  const response = await fetch(url)
+  if (!response.ok) {
+    log("// NOPE: " + response.statusText)
+    return {}
+  }
+  else {
+    return returnText ? response.text() : response.json()
+  }
+}
+
 /// a flat list of files from the unpkg fs
 function flab(ufs: UnpkgFS): string[] {
   if (ufs.type === "file")
@@ -88,11 +108,6 @@ function flatMap<T, U>(l: T[], f: (t: T) => U[]): U[] {
   for (const x of l)
     acc.push(...f(x))
   return acc
-}
-
-/// find index.js from package.json or whatever
-function main(ufs: UnpkgFS) {
-  
 }
 
 export default makePlugin
