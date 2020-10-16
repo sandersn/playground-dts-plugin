@@ -9,7 +9,6 @@ const makePlugin = (utils: PluginUtils) => {
       console.log("Showing new plugin")
       const options = { ...sandbox.getCompilerOptions(), allowJs: true, checkJs: true };
       const { createSystem, createDefaultMapFromCDN, createVirtualCompilerHost } = sandbox.tsvfs
-      // TODO: May need to allow user to configure which libs to include
       const fsMap = await createDefaultMapFromCDN(options, sandbox.ts.version, true, sandbox.ts)
 
       // Create a design system object to handle
@@ -21,19 +20,29 @@ const makePlugin = (utils: PluginUtils) => {
 
       const startButton = document.createElement("input")
       startButton.type = "button"
-      startButton.value = "Change the code in the editor"
+      startButton.value = "Load npm package"
       const name = document.createElement("input")
       name.type = "input"
-      name.value = "react"
+      name.value = "barn"
       container.appendChild(name)
       container.appendChild(startButton)
 
       startButton.onclick = async () => {
-        // const o: UnpkgFS = await jfetch(`https://unpkg.com/${name.value}/?meta`, sandbox.setText)
-        // var jss = flab(o).filter(f => f.endsWith('.js'))
+        const unpkgfs: UnpkgFS = await jfetch(`https://unpkg.com/${name.value}/?meta`, sandbox.setText)
+        var jss = flatpkg(unpkgfs).filter(f => f.endsWith('.js'))
+        if (jss.length <= 10) {
+          for (const js of jss) {
+            console.log(js)
+            fsMap.set(js, await jfetch(`https://unpkg.com/${name.value}${js}`, sandbox.setText, /*returnText*/ true))
+          }
+        }
+        else {
+          console.log('Too many javascript files to download: ' + jss.length)
+        }
 
         const p = await jfetch(`https://unpkg.com/${name.value}/package.json`, sandbox.setText)
-        const main = "/" + p.main;
+        const main = lookupMain(p.main)
+        console.log(main)
         const indexjs = await jfetch(`https://unpkg.com/${name.value}${main}`, sandbox.setText, /*returnText*/ true)
         fsMap.set(main, indexjs)
         const system = createSystem(fsMap)
@@ -45,8 +54,9 @@ const makePlugin = (utils: PluginUtils) => {
         })
         console.log('after creating program')
         const sourceFile = program.getSourceFile(main)
-        program.emit(sourceFile, undefined, undefined, true)
-        sandbox.setText(system.readFile("/index.d.ts"))
+        console.log(program.emit(sourceFile, undefined, undefined, true))
+        console.log(system.readDirectory("/"))
+        sandbox.setText(system.readFile(main.slice(0, main.length - 3) + ".d.ts"))
       }
     },
 
@@ -94,11 +104,11 @@ async function jfetch(url: string, log: (s: string) => void, returnText?: boolea
 }
 
 /// a flat list of files from the unpkg fs
-function flab(ufs: UnpkgFS): string[] {
+function flatpkg(ufs: UnpkgFS): string[] {
   if (ufs.type === "file")
     return [ufs.path]
   else
-    return flatMap(ufs.files, flab)
+    return flatMap(ufs.files, flatpkg)
 }
 
 function flatMap<T, U>(l: T[], f: (t: T) => U[]): U[] {
@@ -108,6 +118,13 @@ function flatMap<T, U>(l: T[], f: (t: T) => U[]): U[] {
   for (const x of l)
     acc.push(...f(x))
   return acc
+}
+
+function lookupMain(main: string | undefined) {
+  if (!main) main = "index.js"
+  if (!main.endsWith('.js')) main += '.js'
+  main = main.replace('./', '')
+  return '/' + main
 }
 
 export default makePlugin
